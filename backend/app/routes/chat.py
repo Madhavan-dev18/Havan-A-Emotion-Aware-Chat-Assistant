@@ -2,7 +2,7 @@
 import json
 from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify, current_app
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request
 
 from app import db
 from app.models import ConversationSession, Message, User
@@ -11,8 +11,13 @@ from app.services import emotion_engine, llm_service
 chat_bp = Blueprint("chat", __name__)
 
 @chat_bp.before_request
-@jwt_required()
 def verify_user_exists():
+    # CORS preflight OPTIONS requests carry no JWT — skip authentication entirely.
+    # Flask-CORS handles them; the real request that follows will be authenticated normally.
+    if request.method == "OPTIONS":
+        return
+
+    verify_jwt_in_request()
     user_id = get_jwt_identity()
     if not db.session.get(User, int(user_id)):
         return jsonify({"error": "User record does not exist or has been deleted"}), 401
