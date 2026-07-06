@@ -81,6 +81,31 @@ USE_ML_MODELS=false           # Set to true only if running locally with heavy P
 
 ---
 
+## 🔌 API Endpoints
+
+### Auth (`/api/auth`)
+| Method | Path | Description |
+|---|---|---|
+| POST | `/register` | Create a new user account |
+| POST | `/login` | Authenticate, returns JWT access/refresh cookies |
+| POST | `/logout` | Clear auth cookies |
+| POST | `/refresh` | Exchange refresh token for new access token |
+| GET | `/me` | Get current authenticated user |
+| PATCH | `/update-profile` | Update current user's profile |
+
+### Chat (`/api/chat`)
+| Method | Path | Description |
+|---|---|---|
+| GET | `/sessions` | List chat sessions for current user |
+| POST | `/sessions` | Create a new chat session |
+| GET | `/sessions/<session_id>` | Get a session's message history |
+| DELETE | `/sessions/<session_id>` | Delete a chat session |
+| POST | `/sessions/<session_id>/messages` | Send a message; returns LLM reply with emotion context |
+
+All endpoints except `/register` and `/login` require a valid JWT (sent via `Authorization` header, per `JWT_TOKEN_LOCATION=["headers"]` in `config.py`).
+
+---
+
 ## 🧪 Running Tests
 
 ### Backend
