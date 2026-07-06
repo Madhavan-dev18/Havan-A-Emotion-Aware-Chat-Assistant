@@ -10,6 +10,13 @@ from app.services import emotion_engine, llm_service
 
 chat_bp = Blueprint("chat", __name__)
 
+@chat_bp.before_request
+@jwt_required()
+def verify_user_exists():
+    user_id = get_jwt_identity()
+    if not db.session.get(User, int(user_id)):
+        return jsonify({"error": "User record does not exist or has been deleted"}), 401
+
 @chat_bp.get("/sessions")
 @jwt_required()
 def list_sessions():
@@ -80,6 +87,17 @@ def send_message(session_id):
     emotion_data = emotion_engine.analyze(content)
     emotion_data["visual_emotion"] = visual_emotion 
 
+    # 1. Fetch previous conversation history efficiently from database
+    history_messages = (
+        Message.query
+        .filter_by(session_id=session_id)
+        .order_by(Message.created_at.desc())
+        .limit(current_app.config["MAX_MEMORY_TURNS"])
+        .all()
+    )
+    history = [{"role": m.role, "content": m.content} for m in reversed(history_messages)]
+
+    # 2. Add and commit user message to release db connection before external API call
     user_msg = Message(
         session_id=session_id, role="user", content=content,
         primary_emotion=emotion_data["primary_emotion"], visual_emotion=visual_emotion,
@@ -89,23 +107,25 @@ def send_message(session_id):
     )
     db.session.add(user_msg)
 
-    history = [{"role": m.role, "content": m.content} for m in session.messages[-current_app.config["MAX_MEMORY_TURNS"]:]]
+    session.message_count = (session.message_count or 0) + 1
+    session.updated_at = datetime.now(timezone.utc)
+    session.dominant_emotion = emotion_data["primary_emotion"]
+    if session.message_count <= 1:
+        session.title = content[:60] + ("…" if len(content) > 60 else "")
+    db.session.commit()
 
+    # 3. Call external Groq API
     llm_result = llm_service.generate_response(
         user_message=content, emotion_data=emotion_data, conversation_history=history,
         groq_api_key=current_app.config.get("GROQ_API_KEY", ""),
         groq_model=current_app.config.get("GROQ_MODEL", "llama-3.1-8b-instant"),
     )
 
+    # 4. Save and commit assistant message in a fresh database context
     assistant_msg = Message(session_id=session_id, role="assistant", content=llm_result["content"])
     db.session.add(assistant_msg)
 
-    session.message_count = (session.message_count or 0) + 2
-    session.updated_at = datetime.now(timezone.utc)
-    session.dominant_emotion = emotion_data["primary_emotion"]
-    if session.message_count <= 2:
-        session.title = content[:60] + ("…" if len(content) > 60 else "")
-
+    session.message_count = (session.message_count or 0) + 1
     db.session.commit()
 
     return jsonify({

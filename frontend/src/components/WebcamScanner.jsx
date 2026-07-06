@@ -5,7 +5,7 @@ import { Brain, Camera, CameraOff, Activity, AlertTriangle, Lightbulb, MoveDiago
 // ============================================================================
 // CONSTANTS & CONFIGURATION
 // ============================================================================
-const BUFFER_SIZE = 90; // Rolling window of frames (approx 10-15 seconds)
+const BUFFER_SIZE = 30; // Rolling window of frames (approx 12 seconds / 30 frames at 400ms)
 const MIN_FACE_AREA_PERCENT = 8; // Face must take up at least 8% of the camera
 const LIGHTING_CHECK_INTERVAL = 30; // Check lighting every 30 frames
 // DROPPED from 1280x720 to prevent VRAM overflow
@@ -39,14 +39,28 @@ export default function WebcamScanner({ onEmotionDetected }) {
     noFace: false,
   });
 
+  const stopVideo = useCallback(() => {
+    isActiveRef.current = false;
+    setIsCameraActive(false);
+    setFaceDetected(false);
+    setWarnings({ lowLight: false, tooFar: false, noFace: false });
+    
+    if (loopRef.current) clearTimeout(loopRef.current);
+    
+    if (videoRef.current && videoRef.current.srcObject) {
+      videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+      videoRef.current.srcObject = null;
+    }
+  }, []);
+
   // ============================================================================
   // 1. MODEL INITIALIZATION
   // ============================================================================
   useEffect(() => {
     const loadHeavyModels = async () => {
       try {
-        // PERMANENT FIX: Pulling weights directly from CDN. Bypassing broken Vercel routing.
-        const MODEL_URL = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model";
+        // SECURE OFFLINE-FIRST FIX: Loading models locally from the public asset directory
+        const MODEL_URL = "/models";
         
         await Promise.all([
           faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
@@ -62,7 +76,7 @@ export default function WebcamScanner({ onEmotionDetected }) {
 
     // Cleanup physics loops on unmount
     return () => stopVideo();
-  }, []);
+  }, [stopVideo]);
 
   // ============================================================================
   // 2. HARDWARE PIPELINE
@@ -91,19 +105,6 @@ export default function WebcamScanner({ onEmotionDetected }) {
     }
   };
 
-  const stopVideo = useCallback(() => {
-    isActiveRef.current = false;
-    setIsCameraActive(false);
-    setFaceDetected(false);
-    setWarnings({ lowLight: false, tooFar: false, noFace: false });
-    
-    if (loopRef.current) clearTimeout(loopRef.current);
-    
-    if (videoRef.current && videoRef.current.srcObject) {
-      videoRef.current.srcObject.getTracks().forEach(track => track.stop());
-      videoRef.current.srcObject = null;
-    }
-  }, []);
 
   // ============================================================================
   // 3. ENVIRONMENTAL DIAGNOSTICS (Lighting Calculation)
@@ -157,6 +158,8 @@ export default function WebcamScanner({ onEmotionDetected }) {
       const detection = await faceapi
         .detectSingleFace(videoRef.current, options)
         .withFaceExpressions();
+
+      if (!isActiveRef.current) return;
 
       if (detection) {
         setFaceDetected(true);
@@ -229,12 +232,14 @@ export default function WebcamScanner({ onEmotionDetected }) {
         setWarnings(prev => ({ ...prev, noFace: true }));
         setRawScores(null);
       }
-    } catch (err) {
+    } catch {
       // Suppress frame drop noise
     }
 
-    // SLOWED DOWN: Give the GPU's garbage collector time to breathe
-    loopRef.current = setTimeout(runInferenceLoop, 400); 
+    if (isActiveRef.current) {
+      // SLOWED DOWN: Give the GPU's garbage collector time to breathe
+      loopRef.current = setTimeout(runInferenceLoop, 400); 
+    }
   };
 
   // Safe formatter for UI telemetry

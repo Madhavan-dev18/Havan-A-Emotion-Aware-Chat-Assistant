@@ -18,7 +18,16 @@ def generate_response(user_message, emotion_data, conversation_history, groq_api
     # ── CRISIS INTERCEPTOR (SAFETY FIRST) ────────────────────────────────
     if emotion_data.get("is_crisis"):
         return {
-            "content": "I'm detecting that you might be in a crisis. Please know you are not alone and support is available. **If you are in immediate danger, please reach out to emergency services or call 988 (National Suicide Prevention Lifeline) or text HOME to 741741 (Crisis Text Line).** I am an AI, but your safety is extremely important.",
+            "content": (
+                "I'm detecting that you might be in a crisis. Please know you are not alone "
+                "and support is available right now.\n\n"
+                "**🇮🇳 India:** iCall — 9152987821 | Vandrevala Foundation — 1860-2662-345 (24/7)\n"
+                "**🇺🇸 US:** 988 Suicide & Crisis Lifeline (call/text 988) | Crisis Text Line (text HOME to 741741)\n"
+                "**🇬🇧 UK:** Samaritans — 116 123 (24/7, free)\n"
+                "**🌍 International:** https://findahelpline.com\n\n"
+                "If you are in immediate danger, please call your local emergency number. "
+                "I am an AI, but your safety is extremely important."
+            ),
             "source": "safety_interceptor"
         }
 

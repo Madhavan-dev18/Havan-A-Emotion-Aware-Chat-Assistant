@@ -1,15 +1,25 @@
 import os
 from datetime import timedelta
 
+def _require_env(name: str) -> str:
+    """Return the env var value or raise immediately — never fall back to a hardcoded secret."""
+    val = os.getenv(name)
+    if not val:
+        raise RuntimeError(
+            f"Required environment variable {name!r} is not set. "
+            f"Refusing to start with a missing secret. Set it in .env or your deployment config."
+        )
+    return val
+
 class Config:
-    SECRET_KEY = os.getenv("SECRET_KEY", "super-secret-fallback-key")
+    SECRET_KEY = _require_env("SECRET_KEY")
     SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", "sqlite:///havanvision.db")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
     GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
     MAX_MEMORY_TURNS = int(os.getenv("MAX_MEMORY_TURNS", 10))
 
-    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "jwt-super-secret-key")
+    JWT_SECRET_KEY = _require_env("JWT_SECRET_KEY")
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=1)
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
 

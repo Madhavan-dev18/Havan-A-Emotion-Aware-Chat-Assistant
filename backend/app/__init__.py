@@ -14,10 +14,13 @@ import logging
 import os
 import re
 
+from flask_migrate import Migrate
+
 db = SQLAlchemy()
 bcrypt = Bcrypt()
 jwt = JWTManager()
 limiter = Limiter(key_func=get_remote_address, default_limits=["200 per day", "60 per hour"])
+migrate = Migrate()
 
 def create_app(config_name: str = "development") -> Flask:
     app = Flask(__name__)
@@ -26,13 +29,17 @@ def create_app(config_name: str = "development") -> Flask:
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
     from app.config import config_map
-    app.config.from_object(config_map[config_name])
+    config_obj = config_map[config_name]
+    if isinstance(config_obj, type):
+        config_obj = config_obj()
+    app.config.from_object(config_obj)
 
     # ── Extensions ───────────────────────────────────────────────────────
     db.init_app(app)
     bcrypt.init_app(app)
     jwt.init_app(app)
     limiter.init_app(app)
+    migrate.init_app(app, db)
     
     # ── CORS CONFIGURATION ────────────────────────────────────────────────
     # Explicit origins from env (comma-separated) — covers custom domains,
@@ -40,19 +47,15 @@ def create_app(config_name: str = "development") -> Flask:
     origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
     allowed_origins = [origin.strip() for origin in origins_env.split(",") if origin.strip()]
 
-    # Every Vercel deployment (preview AND "production") gets its own unique
-    # *.vercel.app URL, e.g. https://havan-a-emotion-aware-chat-assistant-XXXXXXXXX.vercel.app
-    # New URLs are generated on every push, so an exact-match allowlist breaks
-    # on each deploy. This regex allows any subdomain of vercel.app belonging
-    # to this project, in addition to the explicit origins above.
-    vercel_origin_regex = r"^https://havan-vision[\w-]*\.vercel\.app$"
+    cors_origin_regex_str = os.getenv("CORS_ORIGIN_REGEX", r"^https://havan-vision[\w-]*\.vercel\.app$")
+    cors_origin_pattern = re.compile(cors_origin_regex_str)
 
     # supports_credentials=True is REMOVED. Headers are allowed for JWT Bearer auth.
     CORS(
         app,
         resources={
             r"/api/*": {
-                "origins": allowed_origins + [re.compile(vercel_origin_regex)],
+                "origins": allowed_origins + [cors_origin_pattern],
             }
         },
         allow_headers=["Content-Type", "Authorization"],
@@ -70,5 +73,15 @@ def create_app(config_name: str = "development") -> Flask:
 
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(chat_bp, url_prefix="/api/chat")
+
+    # ── Pre-warm ML Models ────────────────────────────────────────────────
+    if os.getenv("USE_ML_MODELS", "false").lower() == "true":
+        with app.app_context():
+            try:
+                from app.services.emotion_engine import _load_models
+                _load_models()
+                app.logger.info("ML Models pre-warmed successfully.")
+            except Exception as exc:
+                app.logger.critical(f"Failed to pre-warm ML Models during startup: {exc}")
 
     return app

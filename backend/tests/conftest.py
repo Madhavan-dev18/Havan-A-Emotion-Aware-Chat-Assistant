@@ -4,13 +4,13 @@ import pytest
 
 # Force test configuration BEFORE any app imports
 os.environ["FLASK_ENV"] = "development"
-os.environ["SECRET_KEY"] = "test-secret-key"
-os.environ["JWT_SECRET_KEY"] = "test-jwt-secret"
+os.environ["SECRET_KEY"] = "test-secret-key-that-is-at-least-32-bytes-long"
+os.environ["JWT_SECRET_KEY"] = "test-jwt-secret-key-at-least-32-bytes-long"
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 os.environ["GROQ_API_KEY"] = ""
 os.environ["USE_ML_MODELS"] = "false"
 
-from app import create_app, db as _db
+from app import create_app, db as _db, limiter
 
 
 @pytest.fixture(scope="session")
@@ -20,10 +20,12 @@ def app():
     application.config.update({
         "TESTING": True,
         "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
-        "JWT_SECRET_KEY": "test-jwt-secret",
-        "SECRET_KEY": "test-secret-key",
+        "JWT_SECRET_KEY": "test-jwt-secret-key-at-least-32-bytes-long",
+        "SECRET_KEY": "test-secret-key-that-is-at-least-32-bytes-long",
         "GROQ_API_KEY": "",
     })
+    # Disable rate limiting during tests to avoid cascading 429s
+    limiter.enabled = False
     yield application
 
 

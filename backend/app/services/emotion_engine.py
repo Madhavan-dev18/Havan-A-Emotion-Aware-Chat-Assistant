@@ -89,7 +89,7 @@ def _rule_based_emotion(text: str) -> dict:
         "anger": ["angry", "furious", "hate", "mad", "rage", "annoyed", "frustrated", "awful", "stupid"],
         "fear": ["scared", "afraid", "terrified", "anxious", "nervous", "worried", "panic", "dread"],
         "surprise": ["wow", "surprised", "shocked", "unexpected", "unbelievable", "omg", "wait what"],
-        "disgust": ["disgusting", "gross", "horrible", "nasty", "awful", "yuck", "revolting"],
+        "disgust": ["disgusting", "gross", "horrible", "nasty", "yuck", "revolting"],
     }
 
     raw_counts = {}
@@ -103,13 +103,22 @@ def _rule_based_emotion(text: str) -> dict:
         scores["neutral"] = 1.0
         return {"primary": "neutral", "scores": scores}
 
-    scores = {}
+    # Build raw confidence scores per emotion.
+    # Cap each emotion's raw score so a single keyword hit doesn't dominate.
+    raw_scores = {}
     for emotion, count in raw_counts.items():
-        scores[emotion] = min(0.15 + count * 0.25, 0.95) if count > 0 else 0.0
+        raw_scores[emotion] = min(0.15 + count * 0.25, 0.95) if count > 0 else 0.0
 
-    total = sum(scores.values())
-    scores = {k: round(v / total, 4) for k, v in scores.items()}
-    scores["neutral"] = round(max(0.0, 1 - sum(scores.values())), 4)
+    # Compute neutral *before* normalization:
+    # fewer total keyword hits → higher neutral component.
+    total_keywords = sum(len(v) for v in keyword_map.values())
+    match_ratio = min(total_matches / max(total_keywords * 0.15, 1), 1.0)
+    neutral_raw = max(0.05, 1.0 - match_ratio)
+
+    # Normalize all scores (including neutral) so they sum to 1.0.
+    raw_scores["neutral"] = neutral_raw
+    total = sum(raw_scores.values())
+    scores = {k: round(v / total, 4) for k, v in raw_scores.items()}
 
     primary = max(scores, key=lambda k: scores[k])
     return {"primary": primary, "scores": scores}
@@ -219,11 +228,30 @@ def get_emotion_trend(emotion_list: list[dict]) -> dict:
     emotion_counts = Counter(primaries)
     sentiment_counts = Counter(sentiments)
 
+    # Compute trend via least-squares slope over the full intensity series
+    # instead of only comparing the first and last points.
+    n = len(intensities)
+    if n < 2:
+        trend_label = "stable"
+    else:
+        x_mean = (n - 1) / 2.0
+        y_mean = statistics.mean(intensities)
+        numerator = sum((i - x_mean) * (y - y_mean) for i, y in enumerate(intensities))
+        denominator = sum((i - x_mean) ** 2 for i in range(n))
+        slope = numerator / denominator if denominator != 0 else 0.0
+        # Threshold: slope must exceed 0.02 per message to count as a real trend
+        if slope > 0.02:
+            trend_label = "rising"
+        elif slope < -0.02:
+            trend_label = "falling"
+        else:
+            trend_label = "stable"
+
     return {
         "dominant_emotion": emotion_counts.most_common(1)[0][0],
         "emotion_distribution": dict(emotion_counts),
         "avg_intensity": round(statistics.mean(intensities), 3),
-        "intensity_trend": "rising" if intensities[-1] > intensities[0] else "falling" if intensities[-1] < intensities[0] else "stable",
+        "intensity_trend": trend_label,
         "sentiment_distribution": dict(sentiment_counts),
         "total_messages": len(emotion_list),
     }

@@ -9,16 +9,13 @@ from flask_jwt_extended import (
     jwt_required,
     get_jwt_identity
 )
-from app import db, bcrypt
+from app import db, bcrypt, limiter
 from app.models import User
 
 auth_bp = Blueprint("auth", __name__)
 
-@auth_bp.get("/clear")
-def clear_cookies():
-    return jsonify({"msg": "Cookie clearance no longer applicable."})
-
 @auth_bp.post("/register")
+@limiter.limit("5 per minute")
 def register():
     try:
         data = request.get_json(silent=True) or {}
@@ -66,6 +63,7 @@ def register():
         return jsonify({"error": "Registration failed due to a database error."}), 500
 
 @auth_bp.post("/login")
+@limiter.limit("5 per minute")
 def login():
     try:
         data = request.get_json(silent=True) or {}
@@ -101,7 +99,13 @@ def login():
 
 @auth_bp.post("/logout")
 def logout():
-    return jsonify({"msg": "Logged out successfully"}), 200
+    # Stateless JWT design: tokens cannot be server-side invalidated.
+    # The client is responsible for discarding stored tokens.
+    # Tokens remain technically valid until their natural expiry.
+    return jsonify({
+        "msg": "Client-side logout acknowledged. Discard your stored tokens. "
+               "Note: JWTs remain valid until their natural expiry (stateless design)."
+    }), 200
 
 @auth_bp.post("/refresh")
 @jwt_required(refresh=True)
